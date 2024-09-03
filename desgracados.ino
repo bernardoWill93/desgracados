@@ -3,27 +3,25 @@
 #define BUTTON_PIN_LIGA 7
 #define BUTTON_PIN_ESTAGIO_UM 6
 #define BUTTON_PIN_ESTAGIO_DOIS 5
-
+#define DEBOUNCE_DELAY 1
 
 int ledVermelho = 12;
 int ledAzul = 11;
 int buzzer = 10;
-int sensorFumaca = A4;
 int coolerUm = A0;
 int coolerDois = A1;
-
-
+int sensorFumaca = A2;
 int ledPerigoso = 13;
 
 int estagio = 0;
-volatile byte ligado = LOW;
-volatile byte piscaLed = LOW;
-volatile byte alternaBuzzer = LOW;
-volatile byte piscaLedPerigoso = LOW;
+volatile bool sistemaAtivo = false;
+volatile bool ligado = false;
+volatile bool piscaLed = false;
+volatile bool alternaBuzzer = false;
+volatile bool piscaLedPerigoso = false;
 
-
-// Your threshold value
 int sensorThreshreshold = 500;
+int debounceThreshold = 90;
 
 void setup() {
   pinMode(ledVermelho, OUTPUT);
@@ -33,45 +31,28 @@ void setup() {
   pinMode(coolerUm, OUTPUT);
   pinMode(coolerDois, OUTPUT);
   pinMode(ledPerigoso, OUTPUT);
-
-
-  pinMode(BUTTON_PIN_LIGA, INPUT_PULLUP);   // USE EXTERNAL PULL-UP
-  pinMode(BUTTON_PIN_ESTAGIO_UM, INPUT_PULLUP);  // USE EXTERNAL PULL-UP
-  pinMode(BUTTON_PIN_ESTAGIO_DOIS, INPUT_PULLUP);  // USE EXTERNAL PULL-UP
-
+  pinMode(BUTTON_PIN_LIGA, INPUT_PULLUP);
+  pinMode(BUTTON_PIN_ESTAGIO_UM, INPUT_PULLUP);
+  pinMode(BUTTON_PIN_ESTAGIO_DOIS, INPUT_PULLUP);
 
   Serial.begin(9600);
-  noInterrupts();  // disable all interrupts
-
-
-
+  noInterrupts();
   TCCR1A = 0;
-
   TCCR1B = 0;
-
-  TCNT1 = 0xD2F7;  // preload timer
-
-  TCCR1B |= (1 << CS10) | (1 << CS12);  // 1024 prescaler
-
-  TIMSK1 |= (1 << TOIE1);  // enable timer overflow interrupt ISR
-
-  interrupts();  // enable all interrupts
+  TCNT1 = 0xD2F7;
+  TCCR1B |= (1 << CS10) | (1 << CS12);
+  TIMSK1 |= (1 << TOIE1);
+  interrupts();
 }
 
-
-ISR(TIMER1_OVF_vect)  // interrupt service routine for overflow
-
-{
-  TCNT1 = 0xD2F7;  // preload timer
-
+ISR(TIMER1_OVF_vect) {
+  TCNT1 = 0xD2F7;
   alternaBuzzer = !alternaBuzzer;
-
   piscaLedPerigoso = !piscaLedPerigoso;
 
-  if (checaSeHaFumaca() && alternaBuzzer && sistemaEstaLigado()) {
+  if (checaSeHaFumaca() && alternaBuzzer && sistemaEstaLigado() && retornaAtivo() || (alternaBuzzer && sistemaEstaLigado() && retornaAtivo())) {
     tone(buzzer, 1000);
     digitalWrite(ledPerigoso, piscaLedPerigoso);
-
     return;
   }
   naoHaFumaca();
@@ -79,55 +60,54 @@ ISR(TIMER1_OVF_vect)  // interrupt service routine for overflow
 }
 
 void loop() {
-
   estagiosSistema();
   Serial.println("estagio: ");
   Serial.print(estagio);
   ligaDesligaSistema();
 
-  
-
   if (!sistemaEstaLigado()) {
     alteraLeds();
     desligaEstagios();
-    
+    sistemaAtivo = false;
 
     return;
   }
-  Serial.println("desgraçado");
 
-  if(retornaEstagio() == 0){
-      Serial.println("ta zero");
+  if (retornaEstagio() == 0) {
+      Serial.println("aquiiii ");
+          sistemaAtivo = false;
 
     desligaEstagios();
     return;
   }
-
+  Serial.println("passou");
 
   ativaEstagios();
 
   if (checaSeHaFumaca()) {
+    sistemaAtivo = true;
     temFumaca();
     return;
   }
+  if(retornaEstagio() == 0)
+    sistemaAtivo = false;
+  
   naoHaFumaca();
 }
 
 void ligaDesligaSistema() {
-  if (retornaBounce(BUTTON_PIN_LIGA) > 90) {
-
+  if (retornaBounce(BUTTON_PIN_LIGA) > debounceThreshold) {
     ligado = true;
     Serial.println("ligado");
-
+    digitalWrite(ledVermelho, LOW);
+    digitalWrite(ledAzul, HIGH);
     return;
   }
   ligado = false;
 }
 
 bool sistemaEstaLigado() {
-  if (ligado)
-    return true;
-  return false;
+  return ligado;
 }
 
 void alteraLeds() {
@@ -141,10 +121,7 @@ bool checaSeHaFumaca() {
   int leituraSensor = analogRead(sensorFumaca);
   Serial.print("analog: ");
   Serial.println(leituraSensor);
-
-  if (leituraSensor > sensorThreshreshold)
-    return true;
-  return false;
+  return leituraSensor > sensorThreshreshold;
 }
 
 void temFumaca() {
@@ -166,7 +143,7 @@ void primeiroEstagio() {
     digitalWrite(coolerDois, HIGH);
     return;
   }
-  if(retornaEstagio() == 0){
+  if (retornaEstagio() == 0) {
     digitalWrite(coolerUm, LOW);
     digitalWrite(coolerDois, LOW);
   }
@@ -178,7 +155,7 @@ void segundoEstagio() {
     digitalWrite(coolerDois, HIGH);
     return;
   }
-  if(retornaEstagio() == 0){
+  if (retornaEstagio() == 0) {
     digitalWrite(coolerDois, LOW);
   }
 }
@@ -189,7 +166,8 @@ void desligaEstagios() {
 }
 
 void ativaEstagios() {
-  if(retornaEstagio == 0){
+  if (retornaEstagio() == 0) {
+    sistemaAtivo = false;
     desligaEstagios();
     return;
   }
@@ -202,18 +180,16 @@ void ativaEstagios() {
 }
 
 void estagiosSistema() {
-
-  if ((retornaBounce(BUTTON_PIN_ESTAGIO_UM) > 90) && (retornaBounce(BUTTON_PIN_ESTAGIO_DOIS) > 90)) {
+  if ((retornaBounce(BUTTON_PIN_ESTAGIO_UM) > debounceThreshold) && (retornaBounce(BUTTON_PIN_ESTAGIO_DOIS) > debounceThreshold)) {
     estagio = 0;
     return;
   }
 
-  if (retornaBounce(BUTTON_PIN_ESTAGIO_DOIS) > 90) {
+  if (retornaBounce(BUTTON_PIN_ESTAGIO_DOIS) > debounceThreshold) {
     estagio = 2;
     return;
-  }  
+  }
   estagio = 1;
-
 }
 
 int retornaEstagio() {
@@ -221,13 +197,16 @@ int retornaEstagio() {
 }
 
 int retornaBounce(int button) {
-
   int counter = 0;
   int leituraSensor = digitalRead(button);
   for (int i = 0; i <= 100; i++) {
     if (digitalRead(button) == true)
       counter++;
-    delay(5);
+    delay(DEBOUNCE_DELAY);
   }
   return counter;
+}
+
+bool retornaAtivo(){
+  return sistemaAtivo;
 }
