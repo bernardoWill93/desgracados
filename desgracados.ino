@@ -23,6 +23,8 @@ volatile bool piscaLedPerigoso = false;
 int sensorThreshreshold = 500;
 int debounceThreshold = 90;
 
+
+
 void setup() {
   pinMode(ledVermelho, OUTPUT);
   pinMode(ledAzul, OUTPUT);
@@ -55,7 +57,7 @@ ISR(TIMER1_OVF_vect) {
     digitalWrite(ledPerigoso, piscaLedPerigoso);
     return;
   }
-  naoHaFumaca();
+  noTone(buzzer);
   digitalWrite(ledPerigoso, LOW);
 }
 
@@ -89,18 +91,22 @@ void loop() {
     temFumaca();
     return;
   }
+  
   if(retornaEstagio() == 0)
     sistemaAtivo = false;
   
+    
   naoHaFumaca();
 }
 
 void ligaDesligaSistema() {
   if (retornaBounce(BUTTON_PIN_LIGA) > debounceThreshold) {
+    if(!ligado){
+      digitalWrite(ledVermelho, LOW);
+      digitalWrite(ledAzul, HIGH);
+    }
     ligado = true;
     Serial.println("ligado");
-    digitalWrite(ledVermelho, LOW);
-    digitalWrite(ledAzul, HIGH);
     return;
   }
   ligado = false;
@@ -131,7 +137,11 @@ void temFumaca() {
 }
 
 void naoHaFumaca() {
-  noTone(buzzer);
+  if(!retornaAtivo()){
+    noTone(buzzer);
+    digitalWrite(ledVermelho, LOW);
+    digitalWrite(ledAzul, HIGH);
+  }
 }
 
 void primeiroEstagio() {
@@ -163,6 +173,7 @@ void segundoEstagio() {
 void desligaEstagios() {
   digitalWrite(coolerUm, LOW);
   digitalWrite(coolerDois, LOW);
+  
 }
 
 void ativaEstagios() {
